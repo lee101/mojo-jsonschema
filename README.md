@@ -101,9 +101,9 @@ Machine: Intel(R) Xeon(R) CPU E5-2697 v4 @ 2.30GHz; Linux x86_64.
 
 | case | mojo-jsonschema | jsonschema 4.x | result |
 | --- | ---: | ---: | ---: |
-| flat valid records (100k) | 913.0 ms | 4468.6 ms | 4.89x faster |
-| flat mixed records (100k) | 482.3 ms | 5014.6 ms | 10.40x faster |
-| nested fixed records (20k) | 300.0 ms | 1946.6 ms | 6.49x faster |
+| flat valid records (100k) | 480.9 ms | 4129.1 ms | 8.59x faster |
+| flat mixed records (100k) | 472.1 ms | 4008.7 ms | 8.49x faster |
+| nested fixed records (20k) | 174.5 ms | 1093.9 ms | 6.27x faster |
 
 All three rows use the Mojo kernel. The nested case contains required objects
 and an exact-size homogeneous array, which the column plan expands into fixed
