@@ -1,11 +1,11 @@
 """C ABI for batched validation of columnar JSON values."""
 
-from std.algorithm.functional import parallelize
+from std.runtime.asyncrt import TaskGroup, initialize_runtime
 from std.sys.info import simd_width_of as simdwidthof
 
 
-comptime IPtr = UnsafePointer[Int64, AnyOrigin[mut=True]]
-comptime FPtr = UnsafePointer[Float64, AnyOrigin[mut=True]]
+comptime IPtr = Pointer[Int64, AnyOrigin[mut=True]]
+comptime FPtr = Pointer[Float64, AnyOrigin[mut=True]]
 comptime W = simdwidthof[DType.float64]()
 comptime PARALLEL_THRESHOLD = 262144
 comptime ROWS_PER_TASK = 16384
@@ -30,60 +30,60 @@ def _validate_range(
 ):
     var vector_end = start + ((end - start) // W) * W
     for row in range(start, vector_end, W):
-        valid.store(row, SIMD[DType.int64, W](1))
+        valid.unsafe_store(row, SIMD[DType.int64, W](1))
     for row in range(vector_end, end):
-        valid[row] = 1
+        valid.unsafe_store(row, 1)
 
     for prop in range(nprops):
-        var rule = flags[prop]
-        var expected = type_masks[prop]
+        var rule = flags.unsafe_load(prop)
+        var expected = type_masks.unsafe_load(prop)
         var base = prop * nrows
 
         if (rule & 16) != 0:
             for row in range(start, end):
-                if valid[row] == 0:
+                if valid.unsafe_load(row) == 0:
                     continue
                 var index = base + row
-                var tag = tags[index]
+                var tag = tags.unsafe_load(index)
                 if tag == 0:
                     if (rule & 128) != 0:
-                        valid[row] = 0
+                        valid.unsafe_store(row, 0)
                     continue
                 if expected != 0 and (tag & expected) == 0:
-                    valid[row] = 0
+                    valid.unsafe_store(row, 0)
                     continue
                 if (tag & 12) != 0:
-                    var value = numbers[index]
-                    if (rule & 1) != 0 and value < minimums[prop]:
-                        valid[row] = 0
+                    var value = numbers.unsafe_load(index)
+                    if (rule & 1) != 0 and value < minimums.unsafe_load(prop):
+                        valid.unsafe_store(row, 0)
                         continue
-                    if (rule & 2) != 0 and value > maximums[prop]:
-                        valid[row] = 0
+                    if (rule & 2) != 0 and value > maximums.unsafe_load(prop):
+                        valid.unsafe_store(row, 0)
                         continue
-                    if (rule & 4) != 0 and value <= minimums[prop]:
-                        valid[row] = 0
+                    if (rule & 4) != 0 and value <= minimums.unsafe_load(prop):
+                        valid.unsafe_store(row, 0)
                         continue
-                    if (rule & 8) != 0 and value >= maximums[prop]:
-                        valid[row] = 0
+                    if (rule & 8) != 0 and value >= maximums.unsafe_load(prop):
+                        valid.unsafe_store(row, 0)
                         continue
-                    var divisor = multiples[prop]
+                    var divisor = multiples.unsafe_load(prop)
                     var quotient = value / divisor
                     if Float64(Int(quotient)) != quotient:
-                        valid[row] = 0
+                        valid.unsafe_store(row, 0)
                         continue
                 if (tag & 48) != 0:
-                    var length = lengths[index]
-                    if (rule & 32) != 0 and length < min_lengths[prop]:
-                        valid[row] = 0
+                    var length = lengths.unsafe_load(index)
+                    if (rule & 32) != 0 and length < min_lengths.unsafe_load(prop):
+                        valid.unsafe_store(row, 0)
                         continue
-                    if (rule & 64) != 0 and length > max_lengths[prop]:
-                        valid[row] = 0
+                    if (rule & 64) != 0 and length > max_lengths.unsafe_load(prop):
+                        valid.unsafe_store(row, 0)
             continue
 
         for row in range(start, vector_end, W):
             var index = base + row
-            var current = valid.load[width=W](row)
-            var tag = tags.load[width=W](index)
+            var current = valid.unsafe_load[width=W](row)
+            var tag = tags.unsafe_load[width=W](index)
             var ok = current.ne(SIMD[DType.int64, W](0))
             if (rule & 128) != 0:
                 ok &= tag.ne(SIMD[DType.int64, W](0))
@@ -99,26 +99,26 @@ def _validate_range(
             )
             if (rule & 1) != 0:
                 ok &= ~numeric | (
-                    numbers.load[width=W](index).ge(
-                        SIMD[DType.float64, W](minimums[prop])
+                    numbers.unsafe_load[width=W](index).ge(
+                        SIMD[DType.float64, W](minimums.unsafe_load(prop))
                     )
                 )
             if (rule & 2) != 0:
                 ok &= ~numeric | (
-                    numbers.load[width=W](index).le(
-                        SIMD[DType.float64, W](maximums[prop])
+                    numbers.unsafe_load[width=W](index).le(
+                        SIMD[DType.float64, W](maximums.unsafe_load(prop))
                     )
                 )
             if (rule & 4) != 0:
                 ok &= ~numeric | (
-                    numbers.load[width=W](index).gt(
-                        SIMD[DType.float64, W](minimums[prop])
+                    numbers.unsafe_load[width=W](index).gt(
+                        SIMD[DType.float64, W](minimums.unsafe_load(prop))
                     )
                 )
             if (rule & 8) != 0:
                 ok &= ~numeric | (
-                    numbers.load[width=W](index).lt(
-                        SIMD[DType.float64, W](maximums[prop])
+                    numbers.unsafe_load[width=W](index).lt(
+                        SIMD[DType.float64, W](maximums.unsafe_load(prop))
                     )
                 )
 
@@ -127,17 +127,17 @@ def _validate_range(
             )
             if (rule & 32) != 0:
                 ok &= ~sized | (
-                    lengths.load[width=W](index).ge(
-                        SIMD[DType.int64, W](min_lengths[prop])
+                    lengths.unsafe_load[width=W](index).ge(
+                        SIMD[DType.int64, W](min_lengths.unsafe_load(prop))
                     )
                 )
             if (rule & 64) != 0:
                 ok &= ~sized | (
-                    lengths.load[width=W](index).le(
-                        SIMD[DType.int64, W](max_lengths[prop])
+                    lengths.unsafe_load[width=W](index).le(
+                        SIMD[DType.int64, W](max_lengths.unsafe_load(prop))
                     )
                 )
-            valid.store(
+            valid.unsafe_store(
                 row,
                 ok.select(
                     SIMD[DType.int64, W](1), SIMD[DType.int64, W](0)
@@ -145,38 +145,38 @@ def _validate_range(
             )
 
         for row in range(vector_end, end):
-            if valid[row] == 0:
+            if valid.unsafe_load(row) == 0:
                 continue
             var index = base + row
-            var tag = tags[index]
+            var tag = tags.unsafe_load(index)
             if tag == 0:
                 if (rule & 128) != 0:
-                    valid[row] = 0
+                    valid.unsafe_store(row, 0)
                 continue
             if expected != 0 and (tag & expected) == 0:
-                valid[row] = 0
+                valid.unsafe_store(row, 0)
                 continue
             if (tag & 12) != 0:
-                var value = numbers[index]
-                if (rule & 1) != 0 and value < minimums[prop]:
-                    valid[row] = 0
+                var value = numbers.unsafe_load(index)
+                if (rule & 1) != 0 and value < minimums.unsafe_load(prop):
+                    valid.unsafe_store(row, 0)
                     continue
-                if (rule & 2) != 0 and value > maximums[prop]:
-                    valid[row] = 0
+                if (rule & 2) != 0 and value > maximums.unsafe_load(prop):
+                    valid.unsafe_store(row, 0)
                     continue
-                if (rule & 4) != 0 and value <= minimums[prop]:
-                    valid[row] = 0
+                if (rule & 4) != 0 and value <= minimums.unsafe_load(prop):
+                    valid.unsafe_store(row, 0)
                     continue
-                if (rule & 8) != 0 and value >= maximums[prop]:
-                    valid[row] = 0
+                if (rule & 8) != 0 and value >= maximums.unsafe_load(prop):
+                    valid.unsafe_store(row, 0)
                     continue
             if (tag & 48) != 0:
-                var length = lengths[index]
-                if (rule & 32) != 0 and length < min_lengths[prop]:
-                    valid[row] = 0
+                var length = lengths.unsafe_load(index)
+                if (rule & 32) != 0 and length < min_lengths.unsafe_load(prop):
+                    valid.unsafe_store(row, 0)
                     continue
-                if (rule & 64) != 0 and length > max_lengths[prop]:
-                    valid[row] = 0
+                if (rule & 64) != 0 and length > max_lengths.unsafe_load(prop):
+                    valid.unsafe_store(row, 0)
 
 
 @export("mjs_validate_flat")
@@ -248,7 +248,7 @@ def mjs_validate_flat(
 
     var num_tasks = (nrows + ROWS_PER_TASK - 1) // ROWS_PER_TASK
 
-    def work(task: Int) capturing:
+    async def work(task: Int) capturing:
         var start = task * ROWS_PER_TASK
         var end = min(start + ROWS_PER_TASK, nrows)
         _validate_range(
@@ -269,5 +269,9 @@ def mjs_validate_flat(
             nprops,
         )
 
-    parallelize[work](num_tasks)
+    initialize_runtime()
+    var tasks = TaskGroup()
+    for task in range(num_tasks):
+        tasks.create_task(work(task))
+    tasks.wait()
     return 0
