@@ -1,6 +1,5 @@
 """C ABI for batched validation of columnar JSON values."""
 
-from std.runtime.asyncrt import TaskGroup, initialize_runtime
 from std.sys.info import simd_width_of as simdwidthof
 
 
@@ -248,7 +247,8 @@ def mjs_validate_flat(
 
     var num_tasks = (nrows + ROWS_PER_TASK - 1) // ROWS_PER_TASK
 
-    async def work(task: Int) capturing:
+    @__parameter
+    def work(task: Int):
         var start = task * ROWS_PER_TASK
         var end = min(start + ROWS_PER_TASK, nrows)
         _validate_range(
@@ -269,9 +269,6 @@ def mjs_validate_flat(
             nprops,
         )
 
-    initialize_runtime()
-    var tasks = TaskGroup()
     for task in range(num_tasks):
-        tasks.create_task(work(task))
-    tasks.wait()
+        work(task)
     return 0
